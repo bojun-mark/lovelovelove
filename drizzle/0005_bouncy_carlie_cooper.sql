@@ -1,0 +1,2 @@
+ALTER TABLE `quiz_sessions` MODIFY COLUMN `status` enum('pending','paid','failed','expired') NOT NULL DEFAULT 'pending';--> statement-breakpoint
+ALTER TABLE `quiz_sessions` ADD `stripeCheckoutSessionId` varchar(255);
