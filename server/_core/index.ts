@@ -9,7 +9,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import Stripe from "stripe";
 import { ENV } from "./env";
-import { markQuizSessionPaid } from "../db";
+import { getDb, markQuizSessionPaid } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -31,6 +31,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  if (process.env.DATABASE_URL) await getDb();
   const app = express();
   const server = createServer(app);
   app.set("trust proxy", 1);
@@ -88,4 +89,7 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer().catch(() => {
+  console.error("Startup failed. Check database configuration and ca.pem if DATABASE_URL is set.");
+  process.exitCode = 1;
+});
