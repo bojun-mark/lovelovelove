@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { X509Certificate } from "node:crypto";
 import mysql from "mysql2/promise";
 import { eq } from "drizzle-orm";
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
@@ -9,10 +10,16 @@ let _db: MySql2Database | null = null;
 let connecting: Promise<void> | null = null;
 async function initializeDatabase() {
   let pool: ReturnType<typeof mysql.createPool> | undefined;
+  let stage = "DATABASE_URL format";
   try {
     const url = new URL(process.env.DATABASE_URL!);
     if (url.protocol !== "mysql:" || !url.hostname || !url.username || url.pathname.length < 2) throw new Error("Invalid configuration");
+    stage = "read ca.pem";
     const ca = readFileSync(process.env.DATABASE_CA_PATH || "/etc/secrets/ca.pem", "utf8");
+    stage = "validate ca.pem";
+    const certificate = new X509Certificate(ca);
+    if (!certificate.ca) throw new Error("Invalid CA certificate");
+    stage = "connect to MySQL";
     pool = mysql.createPool({
       host: url.hostname, port: Number(url.port || 3306),
       user: decodeURIComponent(url.username), password: decodeURIComponent(url.password),
@@ -22,6 +29,7 @@ async function initializeDatabase() {
     });
     await pool.query("SELECT 1");
     console.log("[Database] TLS connection verified");
+    stage = "create tables";
     const statements = [
   "CREATE TABLE IF NOT EXISTS `users` (`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY,\n`openId` VARCHAR(64) NOT NULL UNIQUE,\n`name` TEXT,\n`email` VARCHAR(320),\n`loginMethod` VARCHAR(64),\n`role` ENUM('user','admin') NOT NULL DEFAULT 'user',\n`createdAt` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n`updatedAt` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n`lastSignedIn` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
   "CREATE TABLE IF NOT EXISTS `quiz_sessions` (`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY,\n`guestSessionHash` VARCHAR(64) NOT NULL,\n`nickname` VARCHAR(80) NOT NULL,\n`birthYear` VARCHAR(4) NOT NULL,\n`birthMonth` VARCHAR(2) NOT NULL,\n`birthDay` VARCHAR(2) NOT NULL,\n`birthTime` VARCHAR(8) NOT NULL,\n`birthPlace` VARCHAR(120) NOT NULL,\n`email` VARCHAR(320) NOT NULL,\n`colors` TEXT NOT NULL,\n`answers` TEXT NOT NULL,\n`category` VARCHAR(80) NOT NULL,\n`subQuestion` TEXT NOT NULL,\n`plan` VARCHAR(80) NOT NULL,\n`amount` INT NOT NULL,\n`status` ENUM('pending','paid','failed','expired') NOT NULL DEFAULT 'pending',\n`stripeCheckoutSessionId` VARCHAR(255),\n`createdAt` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n`updatedAt` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n`expiresAt` TIMESTAMP NOT NULL,\n`consentAt` TIMESTAMP NULL DEFAULT NULL,\nINDEX quiz_sessions_guest_session_hash_idx (guestSessionHash),\nINDEX quiz_sessions_expires_at_idx (expiresAt)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
@@ -29,7 +37,10 @@ async function initializeDatabase() {
     for (const statement of statements) await pool.query(statement);
     _db = drizzle(pool);
     console.log("[Database] Tables ready");
-  } catch {
+  } catch (error) {
+    const rawCode = (error as { code?: unknown })?.code;
+    const code = typeof rawCode === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(rawCode) ? rawCode : "UNCLASSIFIED";
+    console.error("[Database] Failed at: " + stage + "; code=" + code);
     if (pool) await pool.end().catch(() => {});
     throw new Error("[Database] Setup failed. Check DATABASE_URL, ca.pem, and database availability.");
   }
