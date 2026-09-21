@@ -7,7 +7,7 @@
  * while the ascendant uses geocoded latitude/longitude and the local timezone.
  */
 
-import { makeRequest, type GeocodingResult, type TimeZoneResult } from "./_core/map";
+import { resolveBirthMoment } from "../shared/birthplaces";
 
 export type ChartPoint = {
   sign: string;
@@ -137,25 +137,9 @@ function ascendant(date: Date, latitude: number, longitude: number) {
   return lambda;
 }
 
-function timeZoneAt(place: string, localDate: Date) {
-  return makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: place }).then(async geo => {
-    if (geo.status !== "OK" || !geo.results[0]) throw new Error("找不到出生地，請輸入較完整的城市或地區名稱");
-    const location = geo.results[0].geometry.location;
-    const tz = await makeRequest<TimeZoneResult>("/maps/api/timezone/json", {
-      location: `${location.lat},${location.lng}`,
-      timestamp: Math.floor(localDate.getTime() / 1000),
-    });
-    if (tz.status !== "OK") throw new Error("無法取得出生地時區");
-    return { location, tz };
-  });
-}
-
 export async function calculateBirthChart(input: { year: string; month: string; day: string; time?: string; place: string }): Promise<BirthChart> {
-  const hourMinute = input.time && /^\d{1,2}:\d{2}$/.test(input.time) ? input.time.split(":").map(Number) : [12, 0];
-  const localDate = new Date(Date.UTC(Number(input.year), Number(input.month) - 1, Number(input.day), hourMinute[0], hourMinute[1]));
-  const { location, tz } = await timeZoneAt(input.place, localDate);
-  const offsetSeconds = (tz.rawOffset ?? 0) + (tz.dstOffset ?? 0);
-  const utcDate = new Date(localDate.getTime() - offsetSeconds * 1000);
+  const { city, utcDate, hasTime } = resolveBirthMoment(input);
+  const location = { lat: city.latitude, lng: city.longitude };
 
   const planets: Record<string, ChartPoint> = {};
   planets["太陽"] = signPoint(sunLongitude(utcDate));
@@ -175,7 +159,7 @@ export async function calculateBirthChart(input: { year: string; month: string; 
   const houses: Array<{ house: number; sign: string }> = [];
   let asc: ChartPoint | undefined;
   let note: string | undefined;
-  if (input.time && /^\d{1,2}:\d{2}$/.test(input.time)) {
+  if (hasTime) {
     const ascLon = ascendant(utcDate, location.lat, location.lng);
     asc = signPoint(ascLon);
     const ascSign = Math.floor(ascLon / 30);
@@ -184,11 +168,13 @@ export async function calculateBirthChart(input: { year: string; month: string; 
     note = "未提供出生時間，因此未計算上升與宮位；太陽、月亮與行星位置仍依出生日期與地點計算。";
   }
 
+  note = [note, "出生地使用所選城市中心的近似座標。"].filter(Boolean).join(" ");
+
   return {
     calculatedAt: new Date().toISOString(),
     birth: {
       localDateTime: `${input.year}-${String(input.month).padStart(2, "0")}-${String(input.day).padStart(2, "0")} ${input.time || "12:00"}`,
-      utcDateTime: utcDate.toISOString(), place: input.place, latitude: location.lat, longitude: location.lng, timeZone: tz.timeZoneId,
+      utcDateTime: utcDate.toISOString(), place: input.place, latitude: location.lat, longitude: location.lng, timeZone: city.timeZone,
     },
     planets,
     ascendant: asc,

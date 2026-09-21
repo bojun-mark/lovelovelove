@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveBirthMoment } from "../shared/birthplaces";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { attachStripeCheckoutSession, createQuizSession, getQuizSession, getQuizSessionByStripeId, markQuizSessionPaid } from "./db";
@@ -29,6 +30,7 @@ export const appRouter = router({
   starLove: router({
     createCheckout: publicProcedure.input(checkoutInput).mutation(async ({ input, ctx }) => {
       assertAnonymousRateLimit(ctx.req, ctx.guestSessionHash);
+      resolveBirthMoment(input);
       if (!stripe) throw new Error("付款服務尚未設定，請稍後再試");
       const amount = planPrices[input.planId];
       const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), category: input.category, subQuestion: input.subQuestion, plan: input.plan, amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
@@ -62,6 +64,7 @@ export const appRouter = router({
     }),
     saveSession: publicProcedure.input(quizInput).mutation(async ({ input, ctx }) => {
       assertAnonymousRateLimit(ctx.req, ctx.guestSessionHash);
+      resolveBirthMoment(input);
       const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), category: input.category, subQuestion: input.subQuestion, plan: input.plan, amount: input.amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
       return { success: true, id } as const;
     }),
