@@ -1,4 +1,4 @@
-import { ENV } from "./env";
+const getApiKey = () => process.env.OPENAI_API_KEY?.trim();
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -212,15 +212,9 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
-
+const resolveApiUrl = () => "https://api.openai.com/v1/chat/completions";
 const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
+  if (!getApiKey()) throw new Error("OPENAI_API_KEY is not configured");
 };
 
 const normalizeResponseFormat = ({
@@ -268,7 +262,7 @@ const normalizeResponseFormat = ({
   };
 };
 
-const RETRY_MAX_RETRIES = 4;
+const RETRY_MAX_RETRIES = 0;
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 30_000;
 
@@ -362,9 +356,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     messages: messages.map(normalizeMessage),
   };
 
-  if (model) {
-    payload.model = model;
-  }
+  payload.model = model || "gpt-4.1-mini";
 
   if (tools && tools.length > 0) {
     payload.tools = tools;
@@ -378,7 +370,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  const resolvedMaxTokens = max_tokens ?? maxTokens;
+  const resolvedMaxTokens = max_tokens ?? maxTokens ?? 5000;
   if (typeof resolvedMaxTokens === "number") {
     payload.max_tokens = resolvedMaxTokens;
   }
@@ -405,19 +397,23 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${getApiKey()}`,
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
+    await response.body?.cancel();
     throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+      `LLM invoke failed: ${response.status} ${response.statusText}`
     );
   }
 
-  return (await response.json()) as InvokeResult;
+  const result = (await response.json()) as InvokeResult;
+  if (result.choices?.[0]?.finish_reason === "length") throw new Error("AI report reached its length limit; no incomplete report was returned.");
+  if (result.usage) console.log("[OpenAI] Usage", JSON.stringify(result.usage));
+  return result;
 }
 
 export type ModelInfo = {
@@ -435,18 +431,16 @@ export type ModelsResponse = {
 export async function listLLMModels(): Promise<ModelsResponse> {
   assertApiKey();
 
-  const url = ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
-    : "https://forge.manus.im/v1/models";
+  const url = "https://api.openai.com/v1/models";
 
   const response = await fetchWithBackoff(url, {
-    headers: { authorization: `Bearer ${ENV.forgeApiKey}` },
+    headers: { authorization: `Bearer ${getApiKey()}` },
   });
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `List LLM models failed: ${response.status} ${response.statusText} – ${errorText}`
+      `List LLM models failed: ${response.status} ${response.statusText}`
     );
   }
 
