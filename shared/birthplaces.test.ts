@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { birthplaces, birthRegions, birthplaceLabel, resolveBirthplace, resolveBirthMoment } from './birthplaces';
 const moment = (place: string, year='1994', month='7', day='15', time='21:30') => resolveBirthMoment({place,year,month,day,time});
 describe('offline birthplaces', () => {
+  it('covers 22 Taiwan counties and 368 districts without ambiguous district aliases', () => {
+    const tw = birthplaces.filter(c => c.region === 'TW');
+    expect(tw).toHaveLength(368);
+    expect(new Set(tw.map(c => c.county)).size).toBe(22);
+    expect(tw.filter(c => c.county === '新北市')).toHaveLength(29);
+    expect(tw.every(c => c.county && c.district && !c.name.includes('（'))).toBe(true);
+    expect(resolveBirthplace('中正區')).toBeUndefined();
+    const banqiao = resolveBirthplace('台灣・新北市・板橋區')!;
+    const sanxia = resolveBirthplace('台灣・新北市・三峽區')!;
+    expect(banqiao.longitude).not.toBe(sanxia.longitude);
+    expect(resolveBirthplace('台灣・臺北市・中正區')?.county).toBe('台北市');
+    expect(resolveBirthplace('台灣・新北市（板橋）')?.id).toBe('1670029');
+  });
   it('resolves every displayed choice and has valid coordinates/timezones', () => {
     expect(new Set(birthplaces.map(c=>c.id)).size).toBe(birthplaces.length);
     for(const r of birthRegions) expect(birthplaces.some(c=>c.region===r.code)).toBe(true);

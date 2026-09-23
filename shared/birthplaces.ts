@@ -1,18 +1,26 @@
-import { birthplaces } from './birthplaces-data';
-export { birthplaces };
+import { birthplaces as legacyBirthplaces } from './birthplaces-data';
+import { taiwanDistricts } from './taiwan-districts-data';
+export type Birthplace = { id: string; region: string; name: string; latitude: number; longitude: number; timeZone: string; aliases: string[]; county?: string; district?: string };
+export const birthplaces: Birthplace[] = [...taiwanDistricts, ...legacyBirthplaces.filter(c => c.region !== 'TW')];
+export const taiwanCounties = Array.from(new Set(taiwanDistricts.map(c => c.county)));
 export const birthRegions = [
   { code: 'TW', name: '台灣' }, { code: 'HK', name: '香港' },
   { code: 'MO', name: '澳門' }, { code: 'CN', name: '中國大陸' },
   { code: 'SG', name: '新加坡' }, { code: 'MY', name: '馬來西亞' },
 ];
-export type Birthplace = typeof birthplaces[number];
 export const birthplaceLabel = (city: Birthplace) => `${birthRegions.find(r => r.code === city.region)!.name}・${city.name}`;
 const normalize = (value: string) => value.trim().replaceAll('臺', '台').toLowerCase();
 /** Accept canonical labels and unambiguous legacy names, never guess a location. */
 export function resolveBirthplace(value: string): Birthplace | undefined {
   const canonical = birthplaces.find(city => birthplaceLabel(city) === value);
   if (canonical) return canonical;
-  const matches = birthplaces.filter(city => [city.name, ...city.aliases].some(name => normalize(name) === normalize(value)));
+  // Keep saved pre-district labels tied to their original coordinates.
+  const legacy = legacyBirthplaces.find(city => normalize(birthplaceLabel(city)) === normalize(value));
+  if (legacy) return legacy;
+  const normalized = birthplaces.find(city => normalize(birthplaceLabel(city)) === normalize(value));
+  if (normalized) return normalized;
+  const choices = [...birthplaces, ...legacyBirthplaces.filter(c => c.region === 'TW')];
+  const matches = choices.filter(city => [city.name, ...city.aliases].some(name => normalize(name) === normalize(value)));
   return matches.length === 1 ? matches[0] : undefined;
 }
 
