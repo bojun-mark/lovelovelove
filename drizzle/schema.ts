@@ -1,4 +1,4 @@
-import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { char, datetime, index, int, longtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -40,6 +40,19 @@ export const quizSessions = mysqlTable("quiz_sessions", {
 }));
 
 export type User = typeof users.$inferSelect;
+// Created additively at startup by db.ts; keep the schema visible to Drizzle tooling.
+export const reportDeliveries = mysqlTable('report_deliveries', {
+  sessionId: int('sessionId').primaryKey(),
+  recoveryHash: char('recoveryHash', { length: 64 }),
+  report: longtext('report'), chart: longtext('chart'),
+  leaseToken: varchar('leaseToken', { length: 64 }), leaseUntil: datetime('leaseUntil'),
+  attempts: int('attempts').notNull().default(0), lastAttempt: datetime('lastAttempt'),
+  emailState: varchar('emailState', { length: 24 }).notNull().default('not_sent'),
+  emailLease: varchar('emailLease', { length: 64 }), emailLeaseUntil: datetime('emailLeaseUntil'),
+  emailAttempts: int('emailAttempts').notNull().default(0), emailAttemptAt: datetime('emailAttemptAt'),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+  updatedAt: timestamp('updatedAt').defaultNow().onUpdateNow().notNull(),
+});
 export type InsertUser = typeof users.$inferInsert;
 export type QuizSession = typeof quizSessions.$inferSelect;
 export type InsertQuizSession = typeof quizSessions.$inferInsert;

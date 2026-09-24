@@ -3,6 +3,8 @@ import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Compass, Crown, Gem, M
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { BirthplaceSelect } from "@/components/BirthplaceSelect";
+import { OrderCenter, RecoveryReceipt, readRecovery, rememberRecovery, downloadText, emailMessage, type OpenOrder } from '@/components/OrderCenter';
+import '@/components/order-center.css';
 import { resolveBirthMoment } from "@shared/birthplaces";
 
 type FormState = { nickname: string; year: string; month: string; day: string; time: string; place: string; email: string };
@@ -46,6 +48,16 @@ function buildSoulReport(nickname: string, pickedColors: string[], selectedCateg
 }
 
 export default function Home() {
+  const [showOrders, setShowOrders] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [emailState, setEmailState] = useState('');
+  const [reportErrorMessage, setReportErrorMessage] = useState('');
+  const [checkoutPrepared, setCheckoutPrepared] = useState<{sessionId: number; recoveryCode: string; checkoutUrl: string} | null>(null);
+  const [receiptSaved, setReceiptSaved] = useState(false);
+  const deliveryStatus = trpc.starLove.deliveryStatus.useQuery(undefined, { refetchOnWindowFocus: false });
+  const openOrder = trpc.starLove.openOrder.useMutation();
+  const newRecovery = trpc.starLove.recoveryCode.useMutation();
+  const retryEmail = trpc.starLove.retryEmail.useMutation();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(initialForm);
   const [privacyConsent, setPrivacyConsent] = useState(false);
@@ -72,7 +84,40 @@ export default function Home() {
   const createCheckout = trpc.starLove.createCheckout.useMutation();
   const generateReport = trpc.starLove.generateReport.useMutation();
   const verifyPayment = trpc.starLove.verifyPayment.useMutation();
-  const reportPositionKey = "starlovelab-report-position";
+  const reportPositionKey = 'starlovelab-report-position-' + (verifiedSessionId ?? 'none');
+  function startAgain() {
+    if (generateReport.isPending) return;
+    setPaid(false); setPaymentReturn(false); setVerifiedSessionId(null);
+    setAiReport(''); setBirthChart(null); setShowFullReport(false);
+    setRecoveryCode(''); setEmailState(''); setReportError(false); setReportErrorMessage('');
+    setCheckoutPrepared(null); setReceiptSaved(false); setCheckoutRedirecting(false);
+    setForm(initialForm); setPrivacyConsent(false); setPickedColors([]); setAnswers({});
+    setQuestionIndex(0); setCategory(null); setSubQuestion(null); setPlan(null);
+    setSavedReportPosition(0); setReportProgress(0); setActiveReportSection(null);
+    window.history.replaceState({}, '', window.location.pathname);
+    go(1);
+  }
+  function restoreOrder(result: OpenOrder, code: string) {
+    const saved = result.session;
+    setPaymentReturn(false); setForm({ nickname: saved.nickname, year: saved.year, month: saved.month, day: saved.day, time: saved.time, place: saved.place, email: saved.email });
+    setPickedColors(saved.colors); setAnswers(Object.fromEntries(saved.answers.map((value, index) => [index, value])));
+    setCategory(categories.find(item => item.title === saved.category)?.id ?? null);
+    setSubQuestion(saved.subQuestion); setPlan(plans.find(item => item.name === saved.plan)?.id ?? null);
+    setVerifiedSessionId(saved.id); setPaid(true); setBirthChart(result.chart); setAiReport(result.report); setShowFullReport(!!result.report);
+    setRecoveryCode(code || readRecovery(saved.id)); setEmailState(result.emailState); setShowOrders(false);
+    setReportError(!result.report); setReportErrorMessage('此訂單已付款，報告尚未完成。按下方按鈕即可生成或重試，不需再次付款。');
+    window.history.replaceState({}, '', '?order=' + saved.id); window.scrollTo({top: 0});
+  }
+  async function refreshRecovery() {
+    if (!verifiedSessionId) return;
+    try { const result = await newRecovery.mutateAsync({sessionId: verifiedSessionId}); setRecoveryCode(result.code); rememberRecovery(verifiedSessionId, result.code); }
+    catch (e) { toast.error(e instanceof Error ? e.message : '取回碼建立失敗，請稍後再試'); }
+  }
+  async function resendReportEmail() {
+    if (!verifiedSessionId) return;
+    try { const result = await retryEmail.mutateAsync({sessionId: verifiedSessionId, recoveryCode: recoveryCode || undefined}); setEmailState(result.emailState); }
+    catch (e) { toast.error(e instanceof Error ? e.message : '寄信失敗，報告仍可在本頁閱讀'); }
+  }
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const payment = params.get("payment");
@@ -87,18 +132,25 @@ export default function Home() {
           setPickedColors(saved.colors); setAnswers(Object.fromEntries(saved.answers.map((value: number, index: number) => [index, value])));
           setCategory(categories.find(item => item.title === saved.category)?.id ?? null);
           setSubQuestion(saved.subQuestion); setPlan(plans.find(item => item.name === saved.plan)?.id ?? null); setVerifiedSessionId(saved.id); setBirthChart(result.chart); setPaid(true);
-          window.localStorage.removeItem("starlovelab-checkout-state");
-          window.history.replaceState({}, "", window.location.pathname);
+          setRecoveryCode(readRecovery(saved.id));
+          try { window.localStorage.removeItem('starlovelab-checkout-state'); } catch {}
+          window.history.replaceState({}, '', '?order=' + saved.id);
         } catch (error) {
-          setPaid(false); setPaymentReturn(false);
+          setPaid(false); setPaymentReturn(false); setShowOrders(true);
           toast.error(error instanceof Error ? error.message : "付款驗證失敗，請稍後重試");
         }
       })();
+    } else if (params.get('order') && /^\d+$/.test(params.get('order')!)) {
+      const id = Number(params.get('order'));
+      const code = readRecovery(id);
+      void openOrder.mutateAsync({ sessionId: id, recoveryCode: code || undefined }).then(result => restoreOrder(result, code)).catch(() => {
+        setShowOrders(true); toast.error('請從「我的訂單與報告」重新查詢，或輸入私人取回碼。請勿重複付款。');
+      });
     } else if (payment === "cancelled") {
       toast.info("付款尚未完成，你可以重新選擇方案。");
       window.history.replaceState({}, "", window.location.pathname);
     }
-    const stored = Number(window.localStorage.getItem(reportPositionKey) ?? 0);
+    let stored = 0; try { stored = Number(window.localStorage.getItem(reportPositionKey) ?? 0); } catch {}
     if (Number.isFinite(stored) && stored > 0) setSavedReportPosition(stored);
   }, []);
   useEffect(() => {
@@ -181,25 +233,28 @@ export default function Home() {
   const finishStates = () => { if (Object.keys(answers).length !== 10) return toast.error("還有幾個狀態沒有完成探測"); go(4); };
   const selectPlan = (id: string) => { setPlan(id); go(5); };
   const requestAiReport = async () => {
-    if (!verifiedSessionId) return;
+    if (!verifiedSessionId || generateReport.isPending) return;
     setReportError(false);
     try {
-      const result = await generateReport.mutateAsync({ sessionId: verifiedSessionId });
-      setAiReport(result.report);
+      const result = await generateReport.mutateAsync({ sessionId: verifiedSessionId, recoveryCode: recoveryCode || undefined });
+      setAiReport(result.report); setEmailState(result.emailState);
       setBirthChart(result.chart);
       setShowFullReport(false);
-    } catch {
+    } catch (error) {
+      setReportErrorMessage(error instanceof Error ? error.message : '報告暫時無法取得，請稍後再試；請勿重複付款。');
       setReportError(true);
     }
   };
   const submitPayment = async () => {
-    if (!selectedPlan || !selectedCategory || !subQuestion) return;
+    if (!selectedPlan || !selectedCategory || !subQuestion || checkoutPrepared || createCheckout.isPending) return;
     setCheckoutRedirecting(true);
     try {
-      window.localStorage.setItem("starlovelab-checkout-state", JSON.stringify({ form, pickedColors, answers, category, subQuestion, plan }));
-      const result = await createCheckout.mutateAsync({ ...form, time: form.time || "未提供", colors: pickedColors, answers: Object.values(answers), category: selectedCategory.title, subQuestion, plan: selectedPlan.name, planId: selectedPlan.id as "basic" | "plus" | "full", amount: selectedPlan.price });
+      // Order details are saved on the server; do not persist birth details in browser storage.
+      const result = await createCheckout.mutateAsync({ ...form, time: form.time || undefined, colors: pickedColors, answers: Object.values(answers), category: selectedCategory.title, subQuestion, plan: selectedPlan.name, planId: selectedPlan.id as "basic" | "plus" | "full", amount: selectedPlan.price });
       if (!result.checkoutUrl) throw new Error("付款頁面建立失敗");
-      window.location.assign(result.checkoutUrl);
+      rememberRecovery(result.sessionId, result.recoveryCode);
+      setCheckoutPrepared({sessionId: result.sessionId, recoveryCode: result.recoveryCode, checkoutUrl: result.checkoutUrl});
+      setReceiptSaved(false); setCheckoutRedirecting(false); window.scrollTo({top: 0});
     } catch (error) {
       setCheckoutRedirecting(false);
       toast.error(error instanceof Error ? error.message : "付款頁面建立失敗，請稍後再試");
@@ -299,9 +354,25 @@ export default function Home() {
     <header className="site-header"><a className="brand" href="#top" onClick={(e) => { e.preventDefault(); go(1); }}><OrbitalMark /><span><b>StarLoveLab</b><small>穹頂靈魂實驗室</small></span></a><div className="header-note"><Sparkles size={14} /> 你的靈魂，正在回應</div></header>
     {checkoutRedirecting && <div className="checkout-loading-overlay" role="status" aria-live="polite" aria-label="正在前往 Stripe 安全付款"><div className="checkout-loading-card"><div className="checkout-loading-orbit"><span /><span /><Sparkles size={24} /></div><p className="eyebrow">SECURE CHECKOUT</p><h2>正在開啟安全付款頁面</h2><p>請稍候，我們正在替你建立專屬付款連線。</p><div className="checkout-loading-bar"><span /></div><small>即將前往 Stripe · 請不要關閉此頁面</small></div></div>}
     <main id="top" className="container">
+      <div className="order-entry"><button className="report-action-button" disabled={generateReport.isPending} onClick={() => setShowOrders(v => !v)}>我的訂單與報告</button><small>已付款但沒收到解答？請先查詢，不需再次付款。</small></div>
+      {showOrders && <OrderCenter onOpen={restoreOrder} onClose={() => setShowOrders(false)} />}
+      {checkoutPrepared && !paid && <section className="order-center">
+        <h2>付款前，先保存報告取回碼</h2>
+        <RecoveryReceipt id={checkoutPrepared.sessionId} code={checkoutPrepared.recoveryCode} />
+        <label className="consent-row"><input type="checkbox" checked={receiptSaved} onChange={e => setReceiptSaved(e.target.checked)} />我已自行保存取回碼</label>
+        <button className="primary-button" disabled={!receiptSaved} onClick={() => window.location.assign(checkoutPrepared.checkoutUrl)}>繼續前往安全付款</button>
+      </section>}
+      {paid && verifiedSessionId && <section className="order-center">
+        <h2>訂單 #{verifiedSessionId} · 已確認付款</h2>
+        <p>{aiReport ? '報告已保存，可在訂單建立後 90 天內回來查詢；建議下載自行保留。' : '報告尚在處理；中斷後可從「我的訂單與報告」重試，請勿重複付款。'}</p>
+        {recoveryCode ? <RecoveryReceipt id={verifiedSessionId} code={recoveryCode} /> : <button className="report-action-button" disabled={newRecovery.isPending} onClick={() => void refreshRecovery()}>建立私人取回碼</button>}
+        <p role="status">{emailMessage(emailState || (deliveryStatus.data?.emailConfigured ? 'not_ready' : 'not_configured'))}</p>
+        {aiReport && <button className="report-action-button" onClick={() => downloadText('StarLoveLab-報告-' + verifiedSessionId + '.txt', aiReport)}>下載完整文字報告</button>}
+        {aiReport && deliveryStatus.data?.emailConfigured && emailState !== 'submitted' && <button className="report-action-button" disabled={retryEmail.isPending} onClick={() => void resendReportEmail()}>嘗試寄送已保存的報告</button>}
+      </section>}
       {!paid && step > 1 && <Progress step={step} />}
-      {paid ? <section className="success-view"><div className="success-orb"><Sparkles size={42} /></div><p className="eyebrow">TRANSMISSION COMPLETE</p><h1>你的靈魂輪廓<br /><em>已經被好好看見。</em></h1><p className="lead">{form.email}，這不是替你算命的答案，而是一份針對「{subQuestion}」寫給你的深入分析。報告產生後會顯示於本頁，可下載保存。</p><div className="receipt-card"><span className="receipt-icon"><Mail size={18} /></span><div><strong>{selectedPlan?.name}</strong><small>收件信箱：{form.email}</small></div><b>NT$ {selectedPlan?.price}</b></div>{birthChart && <div className="birth-chart-card"><div className="report-heading"><span>YOUR BIRTH CHART · VERIFIED</span><b>你的出生星圖</b></div><div className="birth-chart-grid">{Object.entries(birthChart.planets ?? {}).map(([name, point]: [string, any]) => <div key={name}><strong>{name}</strong><span>{point.sign} {Number(point.degree).toFixed(1)}°{point.retrograde ? " ℞" : ""}</span></div>)}</div>{birthChart.ascendant && <div className="chart-ascendant">上升：<b>{birthChart.ascendant.sign} {Number(birthChart.ascendant.degree).toFixed(1)}°</b></div>}<small>{birthChart.note ?? `出生地：${birthChart.birth.place} · 時區：${birthChart.birth.timeZone}`}</small></div>}<div className="report-box"><div className="report-heading"><span>STARLOVE NOTE · PERSONAL READING</span><b>給 {form.nickname} 的一封信</b></div>{generateReport.isPending ? <div className="report-loading" style={particleStyle}><div className="cosmic-loader" aria-label="正在生成專屬報告"><span className="cosmic-star star-a" /><span className="cosmic-star star-b" /><span className="cosmic-star star-c" /><span className="cosmic-orbit orbit-one" /><span className="cosmic-orbit orbit-two" /><span className="cosmic-core"><Sparkles size={19} /></span></div><div className="loading-copy"><b>{reportLoadingMessages[loadingMessageIndex]}</b><small>STARLOVE LAB · 正在為你整理一份只屬於你的文字</small><span className="loading-progress"><i /></span></div></div> : reportError ? <div className="report-error"><p>剛剛的解讀沒有完整抵達，但你的測驗資料已經保留。</p><button className="primary-button" onClick={() => void requestAiReport()}>重新生成專屬分析 <ChevronRight size={17} /></button></div> : showFullReport ? <><nav className="report-toc" aria-label="報告章節導覽"><span className="report-toc-label">快速導覽</span>{reportSections.map((section, index) => <button key={section.heading} data-section-index={section.index} className={activeReportSection === section.index ? "active" : ""} aria-current={activeReportSection === section.index ? "location" : undefined} onClick={() => scrollToReportSection(section.index)}><span>0{index + 1}</span>{section.heading}</button>)}</nav>{showContinuePrompt && savedReportPosition > 0 && reportProgress < 100 && <div className="continue-reading"><div><strong>上次讀到這裡</strong><small>已保存你的閱讀位置，想從上次的位置繼續嗎？</small></div><button onClick={continueReading}>繼續閱讀 <ChevronRight size={15} /></button></div>}<div className="report-progress" aria-label={`報告閱讀進度 ${reportProgress}%`}><div className="report-progress-meta"><span>閱讀進度</span><strong>{reportProgress}%</strong></div><div className="report-progress-track"><span style={{ width: `${reportProgress}%` }} /></div></div><div className="report-body">{renderReport()}</div><div className="report-actions"><button className="report-action-button" onClick={downloadReportImage}>下載專屬報告圖片</button><button className="report-action-button" onClick={() => void shareResult()}>分享結果</button></div></> : <><div className="report-teaser">{renderReportPreview()}</div><button className="primary-button" onClick={() => setShowFullReport(true)}>閱讀完整客製化分析 <ChevronRight size={17} /></button></>}</div><button className="ghost-button" onClick={() => { setPaid(false); go(1); }}>重新探索一次</button></section> : <>
-        {step === 1 && <section className="landing-grid"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-line" /> SOUL FREQUENCY LAB · 2026</div><h1>輸入你的誕生密碼，<br /><em>解開今年無法突破的<br className="mobile-break" />隱形盲點</em></h1><p className="hero-sub">不是預測命運，而是讓你看見，<br />一直在你身邊、卻尚未被命名的答案。</p><div className="signal-row"><span><Star size={15} /> 色彩心理學</span><span><Orbit size={15} /> 10 大狀態探測</span><span><Compass size={15} /> 個人化解讀</span></div></div><form className="form-card" onSubmit={start}><div className="card-kicker">01 <span>/ 基本資料</span></div><h2>先讓我們認識你</h2><p className="card-hint">資料僅用於生成你的專屬報告</p><Field label="暱稱" icon={<Sparkles size={14} />}><input value={form.nickname} onChange={(e) => update("nickname", e.target.value)} placeholder="例如：小星" /></Field><div className="field"><span className="field-label"><CalendarDays size={14} />出生年月日</span><div className="date-row"><select value={form.year} onChange={(e) => update("year", e.target.value)}><option value="">年份</option>{yearOptions.map((year) => <option key={year}>{year}</option>)}</select><select value={form.month} onChange={(e) => update("month", e.target.value)}><option value="">月份</option>{Array.from({ length: 12 }, (_, i) => <option key={i + 1}>{i + 1}</option>)}</select><select value={form.day} onChange={(e) => update("day", e.target.value)}><option value="">日期</option>{Array.from({ length: 31 }, (_, i) => <option key={i + 1}>{i + 1}</option>)}</select></div></div><Field label="出生時間（可略）" icon={<Clock3 size={14} />}><input type="time" value={form.time} onChange={(e) => update("time", e.target.value)} /></Field><p className="optional-hint">不知道出生時間也沒關係，仍然可以完成個人分析。</p><div className="field"><span className="field-label"><MapPin size={14} />出生地點</span><BirthplaceSelect value={form.place} onChange={(value) => update("place", value)} /></div><Field label="接收報告的 Email" icon={<Mail size={14} />}><input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@example.com" /></Field><details className="privacy-details"><summary>資料使用說明</summary><p>你提供的資料僅用於生成與寄送個人分析，測驗紀錄最長保存 90 天，並以匿名 Session 綁定；不會要求建立 Manus 帳號。</p></details><label className="consent-row"><input type="checkbox" checked={privacyConsent} onChange={(e) => setPrivacyConsent(e.target.checked)} /><span>我同意 StarLoveLab 使用上述資料生成個人分析，並依照資料使用說明處理。</span></label><button className="primary-button" type="submit">開始生成我的 StarLoveLab 專屬個人分析 <ChevronRight size={18} /></button><small className="privacy-note">✦ 你的資料將被溫柔地保護 · 保存期限最長 90 天</small></form></section>}
+      {paid ? <section className="success-view"><div className="success-orb"><Sparkles size={42} /></div><p className="eyebrow">{aiReport ? "REPORT SAVED" : "PAYMENT CONFIRMED"}</p><h1>{aiReport ? <>你的專屬解答<br /><em>已經準備好了。</em></> : <>付款已確認<br /><em>正在準備你的解答。</em></>}</h1><p className="lead">{form.email}，這不是替你算命的答案，而是一份針對「{subQuestion}」寫給你的深入分析。報告產生後會顯示於本頁，可下載保存。</p><div className="receipt-card"><span className="receipt-icon"><Mail size={18} /></span><div><strong>{selectedPlan?.name}</strong><small>訂單聯絡信箱：{form.email}</small></div><b>NT$ {selectedPlan?.price}</b></div>{birthChart && <div className="birth-chart-card"><div className="report-heading"><span>YOUR BIRTH CHART · VERIFIED</span><b>你的出生星圖</b></div><div className="birth-chart-grid">{Object.entries(birthChart.planets ?? {}).map(([name, point]: [string, any]) => <div key={name}><strong>{name}</strong><span>{point.sign} {Number(point.degree).toFixed(1)}°{point.retrograde ? " ℞" : ""}</span></div>)}</div>{birthChart.ascendant && <div className="chart-ascendant">上升：<b>{birthChart.ascendant.sign} {Number(birthChart.ascendant.degree).toFixed(1)}°</b></div>}<small>{birthChart.note ?? `出生地：${birthChart.birth.place} · 時區：${birthChart.birth.timeZone}`}</small></div>}<div className="report-box"><div className="report-heading"><span>STARLOVE NOTE · PERSONAL READING</span><b>給 {form.nickname} 的一封信</b></div>{generateReport.isPending ? <div className="report-loading" style={particleStyle}><div className="cosmic-loader" aria-label="正在生成專屬報告"><span className="cosmic-star star-a" /><span className="cosmic-star star-b" /><span className="cosmic-star star-c" /><span className="cosmic-orbit orbit-one" /><span className="cosmic-orbit orbit-two" /><span className="cosmic-core"><Sparkles size={19} /></span></div><div className="loading-copy"><b>{reportLoadingMessages[loadingMessageIndex]}</b><small>STARLOVE LAB · 正在為你整理一份只屬於你的文字</small><span className="loading-progress"><i /></span></div></div> : reportError ? <div className="report-error"><p>{reportErrorMessage}</p><button className="primary-button" onClick={() => void requestAiReport()}>取得報告／重試（不需付款） <ChevronRight size={17} /></button></div> : showFullReport ? <><nav className="report-toc" aria-label="報告章節導覽"><span className="report-toc-label">快速導覽</span>{reportSections.map((section, index) => <button key={section.heading} data-section-index={section.index} className={activeReportSection === section.index ? "active" : ""} aria-current={activeReportSection === section.index ? "location" : undefined} onClick={() => scrollToReportSection(section.index)}><span>0{index + 1}</span>{section.heading}</button>)}</nav>{showContinuePrompt && savedReportPosition > 0 && reportProgress < 100 && <div className="continue-reading"><div><strong>上次讀到這裡</strong><small>已保存你的閱讀位置，想從上次的位置繼續嗎？</small></div><button onClick={continueReading}>繼續閱讀 <ChevronRight size={15} /></button></div>}<div className="report-progress" aria-label={`報告閱讀進度 ${reportProgress}%`}><div className="report-progress-meta"><span>閱讀進度</span><strong>{reportProgress}%</strong></div><div className="report-progress-track"><span style={{ width: `${reportProgress}%` }} /></div></div><div className="report-body">{renderReport()}</div><div className="report-actions"><button className="report-action-button" onClick={downloadReportImage}>下載專屬報告圖片</button><button className="report-action-button" onClick={() => void shareResult()}>分享結果</button></div></> : <><div className="report-teaser">{renderReportPreview()}</div><button className="primary-button" onClick={() => setShowFullReport(true)}>閱讀完整客製化分析 <ChevronRight size={17} /></button></>}</div><button className="ghost-button" disabled={generateReport.isPending} onClick={startAgain}>重新探索一次</button></section> : <>
+        {step === 1 && <section className="landing-grid"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-line" /> SOUL FREQUENCY LAB · 2026</div><h1>輸入你的誕生密碼，<br /><em>解開今年無法突破的<br className="mobile-break" />隱形盲點</em></h1><p className="hero-sub">不是預測命運，而是讓你看見，<br />一直在你身邊、卻尚未被命名的答案。</p><div className="signal-row"><span><Star size={15} /> 色彩心理學</span><span><Orbit size={15} /> 10 大狀態探測</span><span><Compass size={15} /> 個人化解讀</span></div></div><form className="form-card" onSubmit={start}><div className="card-kicker">01 <span>/ 基本資料</span></div><h2>先讓我們認識你</h2><p className="card-hint">資料僅用於生成你的專屬報告</p><Field label="暱稱" icon={<Sparkles size={14} />}><input value={form.nickname} onChange={(e) => update("nickname", e.target.value)} placeholder="例如：小星" /></Field><div className="field"><span className="field-label"><CalendarDays size={14} />出生年月日</span><div className="date-row"><select value={form.year} onChange={(e) => update("year", e.target.value)}><option value="">年份</option>{yearOptions.map((year) => <option key={year}>{year}</option>)}</select><select value={form.month} onChange={(e) => update("month", e.target.value)}><option value="">月份</option>{Array.from({ length: 12 }, (_, i) => <option key={i + 1}>{i + 1}</option>)}</select><select value={form.day} onChange={(e) => update("day", e.target.value)}><option value="">日期</option>{Array.from({ length: 31 }, (_, i) => <option key={i + 1}>{i + 1}</option>)}</select></div></div><Field label="出生時間（可略）" icon={<Clock3 size={14} />}><input type="time" value={form.time} onChange={(e) => update("time", e.target.value)} /></Field><p className="optional-hint">不知道出生時間也沒關係，仍然可以完成個人分析。</p><div className="field"><span className="field-label"><MapPin size={14} />出生地點</span><BirthplaceSelect value={form.place} onChange={(value) => update("place", value)} /></div><Field label="訂單聯絡 Email" icon={<Mail size={14} />}><input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@example.com" /></Field><details className="privacy-details"><summary>資料使用說明</summary><p>資料用於訂單、個人分析及已啟用的寄信服務。訂單與報告可於建立後 90 天內查詢；請下載保存。使用付款時的瀏覽器或私人取回碼即可查詢，無須建立帳號。</p></details><label className="consent-row"><input type="checkbox" checked={privacyConsent} onChange={(e) => setPrivacyConsent(e.target.checked)} /><span>我同意 StarLoveLab 使用上述資料生成個人分析，並依照資料使用說明處理。</span></label><button className="primary-button" type="submit">開始生成我的 StarLoveLab 專屬個人分析 <ChevronRight size={18} /></button><small className="privacy-note">✦ 你的資料將被溫柔地保護 · 訂單與報告可查詢 90 天</small></form></section>}
         {step === 2 && <section className="step-section color-step"><div className="step-heading"><div className="eyebrow"><span className="eyebrow-line" /> SIGNAL CALIBRATION · 02</div><h1>哪兩種顏色，<br /><em>讓你的目光停留？</em></h1><p>不要思考。讓第一個浮現的感覺，替你做選擇。</p></div><div className="calculation-note"><span className="pulse-dot" /> 星象運算中... 正在對應你的靈魂磁場... <b>{pickedColors.length} / 2 已選</b></div><div className="color-grid">{colors.map((color, index) => <button key={color.name} disabled={pickedColors.length === 2 && !pickedColors.includes(color.name)} className={`color-card ${pickedColors.includes(color.name) ? "selected" : ""}`} onClick={() => toggleColor(color.name)} style={{ "--swatch": color.hex } as React.CSSProperties}><span className="color-number">0{index + 1}</span><span className="swatch" /><strong>{color.name}</strong><small>{color.note}</small>{pickedColors.includes(color.name) && <span className="selected-mark">✓</span>}</button>)}</div><div className="step-actions"><button className="back-button" onClick={() => go(1)}><ChevronLeft size={17} /> 返回</button><button className="primary-button compact" onClick={finishColors}>鎖定我的色彩密碼 <ChevronRight size={17} /></button></div></section>}
         {step === 3 && <section className="step-section state-step"><div className="step-heading compact-heading"><div className="eyebrow"><span className="eyebrow-line" /> INNER WEATHER SCAN · 03</div><h1>十個問題，<br /><em>捕捉你此刻的內在天氣</em></h1><p>選一個最接近你最近狀態的答案，不用想太久。</p></div><div className="state-card"><div className="question-meta"><span>狀態探測 {String(questionIndex + 1).padStart(2, "0")}</span><span>{questionIndex + 1} / 10</span></div><div className="mini-progress"><span style={{ width: `${((questionIndex + 1) / 10) * 100}%` }} /></div><h2>{states[questionIndex]}</h2><div className="answer-list">{["非常貼近我現在的狀態", "偶爾會有這種感覺", "還不太確定"].map((label, index) => <button key={label} className={answers[questionIndex] === index ? "answer selected" : "answer"} onClick={() => answer(index)}><span className="radio-dot" />{label}<ChevronRight size={17} /></button>)}</div><div className="question-actions"><button className="back-button" onClick={goPrevQuestion} disabled={questionIndex === 0}><ChevronLeft size={16} /> 上一題</button>{questionIndex === 9 ? <button className="primary-button compact" onClick={finishStates}>完成狀態探測 <ChevronRight size={17} /></button> : <span className="auto-next">選擇後自動前往下一題</span>}</div></div></section>}
         {step === 4 && <section className="step-section ask-step"><div className="step-heading"><div className="eyebrow"><span className="eyebrow-line" /> THE CORE QUESTION · 04</div><h1>把你最想知道的事，<br /><em>交給這份分析。</em></h1><p>先選擇一個主題，再從下方選 1 個你最想知道的問題。</p></div><div className="result-summary"><div className="result-summary-head"><span className="eyebrow-line" /><b>先看看你剛剛留下的訊息</b><small>這些不是判決，而是接下來分析的素材</small></div><div className="result-colors"><strong>你的直覺色彩</strong><div>{pickedColors.map((name) => <span key={name}>{name}</span>)}</div></div><div className="result-states"><strong>十大狀態探測回顧</strong>{states.map((state, index) => <div key={state}><span>0{index + 1}</span><p>{state}</p><b>{answerLabels[answers[index]]}</b></div>)}</div></div><div className="category-grid">{categories.map((item) => <button key={item.id} className={`category-card ${category === item.id ? "selected" : ""}`} onClick={() => { setCategory(item.id); setSubQuestion(null); }}><span className="category-icon">{item.icon}</span><span><strong>{item.title}</strong><small>{item.desc}</small></span><ChevronRight size={18} /></button>)}</div>{selectedCategory && <div className="subquestions"><div className="subquestion-title"><span>{selectedCategory.icon}</span><div><b>請再選一個你最想知道的問題</b><small>{selectedCategory.title} · 請從下方選 1 個</small></div></div>{selectedCategory.questions.map((question, index) => <button key={question} className={subQuestion === question ? "subquestion selected" : "subquestion"} onClick={() => setSubQuestion(question)}><span>0{index + 1}</span>{question}<span className="sub-check">{subQuestion === question ? "✓" : ""}</span></button>)}</div>}<div className={`chosen-question ${subQuestion ? "has-selection" : "needs-selection"}`}><span className="chosen-question-icon">{subQuestion ? "✓" : "?"}</span><div><small>已選擇問題</small><strong>{subQuestion ?? "請先從上方選擇一個你最想知道的問題"}</strong>{subQuestion && selectedCategory && <em>{selectedCategory.icon} {selectedCategory.title}</em>}</div></div><div className="step-actions"><button className="back-button" onClick={() => go(3)}><ChevronLeft size={17} /> 返回</button><button className="primary-button compact" disabled={!subQuestion} onClick={() => go(5)}>查看我的專屬方案 <ChevronRight size={17} /></button></div></section>}

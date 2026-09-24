@@ -1,0 +1,13 @@
+.order-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 22px 0; }
+.order-entry small { color: #c9bed8; }
+.order-center { padding: clamp(18px, 4vw, 32px); margin: 22px 0; border: 1px solid #665277; border-radius: 20px; background: #201a2d; color: #f0eafa; text-align: left; overflow-wrap: anywhere; }
+.order-center h2 { margin: 0 0 16px; font-size: 24px; }
+.order-center h3 { margin: 26px 0 12px; }
+.order-center p { line-height: 1.8; margin: 12px 0; }
+.order-center input:not([type=checkbox]) { width: 100%; min-width: 0; padding: 12px; background: #151020; color: #f0eafa; border: 1px solid #8e7c9d; border-radius: 8px; }
+.order-center button { margin: 8px 8px 8px 0; white-space: normal; }
+.order-center .report-action-button, .order-entry .report-action-button { padding: 11px 16px; font-size: 14px; border-radius: 8px; width: auto; flex: none; }
+.order-center button:disabled { opacity: .5; cursor: not-allowed; }
+.order-receipt { padding: 16px; margin: 16px 0; border: 1px solid #665277; border-radius: 12px; }
+.order-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 0; border-top: 1px solid #665277; }
+.order-center [role=alert] { color: #ffd29e; }
