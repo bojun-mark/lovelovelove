@@ -54,6 +54,14 @@ async function initializeDatabase() {
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS ecpay_orders (
+      sessionId INT NOT NULL PRIMARY KEY,
+      tradeNo VARCHAR(20) NOT NULL UNIQUE,
+      environment VARCHAR(8) NOT NULL,
+      merchantId VARCHAR(10) NOT NULL,
+      paid TINYINT NOT NULL DEFAULT 0,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     _pool = pool;
     _db = drizzle(pool);
     console.log("[Database] Tables ready");

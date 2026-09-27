@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { paymentConfig, newTradeNo, siteOrigin } from './ecpay';
+import { attachEcpay, getEcpay, reconcileEcpay } from './ecpayStore';
 import { resolveBirthMoment } from "../shared/birthplaces";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -40,6 +42,8 @@ export const appRouter = router({
       assertReportAccessLimit(ctx.req);
       const delivery = await getDelivery(input.sessionId);
       let session = authorizeOrder(await getQuizSession(input.sessionId), ctx.guestSessionHash, input.recoveryCode, delivery?.recoveryHash);
+      const ecpay = await getEcpay(session.id);
+      if (session.status !== 'paid' && ecpay) session = await reconcileEcpay(ecpay) ?? session;
       // Covers a closed checkout tab or a delayed/missed webhook without another charge.
       if (session.status !== 'paid' && session.stripeCheckoutSessionId && stripe) {
         const checkout = await stripe.checkout.sessions.retrieve(session.stripeCheckoutSessionId);
@@ -70,24 +74,26 @@ export const appRouter = router({
     createCheckout: publicProcedure.input(checkoutInput).mutation(async ({ input, ctx }) => {
       assertAnonymousRateLimit(ctx.req, ctx.guestSessionHash);
       resolveBirthMoment(input);
-      if (!stripe) throw new Error("付款服務尚未設定，請稍後再試");
+      paymentConfig(); siteOrigin();
       const amount = planPrices[input.planId];
       const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), category: input.category, subQuestion: input.subQuestion, plan: input.plan, amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
       if (!id) throw new Error("無法建立付款訂單");
       const recoveryCode = await issueRecoveryCode(id);
-      const origin = `${ctx.req.protocol}://${ctx.req.get("host")}`;
-      const checkout = await stripe.checkout.sessions.create({
-        mode: "payment", customer_email: input.email,
-        line_items: [{ price_data: { currency: "twd", product_data: { name: `StarLoveLab｜${input.plan}` }, unit_amount: amount }, quantity: 1 }],
-        metadata: { quizSessionId: String(id), guestSessionHash: ctx.guestSessionHash, planId: input.planId }, client_reference_id: String(id),
-        success_url: `${origin}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/?payment=cancelled&session_id=${id}`,
-      });
-      await attachStripeCheckoutSession(id, checkout.id);
-      return { success: true, checkoutUrl: checkout.url, sessionId: id, recoveryCode } as const;
+      const tradeNo = newTradeNo();
+      await attachEcpay(id, tradeNo);
+      return { success: true, checkoutUrl: `/api/ecpay/checkout/${tradeNo}`, sessionId: id, recoveryCode } as const;
     }),
     verifyPayment: publicProcedure.input(verifyInput).mutation(async ({ input, ctx }) => {
       assertAnonymousRateLimit(ctx.req, ctx.guestSessionHash);
+      if (/^SL[a-f0-9]{18}$/.test(input.sessionId)) {
+        const payment = await getEcpay(input.sessionId);
+        if (!payment) throw new Error('找不到付款訂單');
+        let session = authorizeOrder(await getQuizSession(payment.sessionId), ctx.guestSessionHash);
+        if (session.status !== 'paid') session = await reconcileEcpay(payment) ?? session;
+        if (session.status !== 'paid') throw new Error('尚未確認付款，請稍後從「我的訂單與報告」查詢，請勿重複付款。');
+        const delivery = await getDelivery(session.id);
+        return { success: true, session: serializeSession(session), chart: delivery?.chart ? JSON.parse(delivery.chart) as BirthChart : null } as const;
+      }
       if (!stripe) throw new Error("付款服務尚未設定，請稍後再試");
       const checkout = await stripe.checkout.sessions.retrieve(input.sessionId);
       const sessionId = Number(checkout.metadata?.quizSessionId ?? checkout.client_reference_id ?? 0);

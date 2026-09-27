@@ -40,6 +40,14 @@ export const quizSessions = mysqlTable("quiz_sessions", {
 }));
 
 export type User = typeof users.$inferSelect;
+export const ecpayOrders = mysqlTable('ecpay_orders', {
+  sessionId: int('sessionId').primaryKey(),
+  tradeNo: varchar('tradeNo', {length: 20}).notNull().unique(),
+  environment: varchar('environment', {length: 8}).notNull(),
+  merchantId: varchar('merchantId', {length: 10}).notNull(),
+  paid: int('paid').notNull().default(0),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+});
 // Created additively at startup by db.ts; keep the schema visible to Drizzle tooling.
 export const reportDeliveries = mysqlTable('report_deliveries', {
   sessionId: int('sessionId').primaryKey(),
