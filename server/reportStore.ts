@@ -56,10 +56,12 @@ export async function releaseReport(id: number, token: string) {
 export async function listOrders(guestHash: string) {
   const pool = await getDatabasePool();
   const [rows] = await pool.execute<RowDataPacket[]>(`SELECT q.id, q.plan, q.amount, q.status, q.createdAt, q.expiresAt,
-    (d.report IS NOT NULL) AS reportReady FROM quiz_sessions q LEFT JOIN report_deliveries d ON d.sessionId = q.id
+    (d.report IS NOT NULL) AS reportReady, (e.environment = 'stage' AND e.paid = 1) AS testPaid
+    FROM quiz_sessions q LEFT JOIN report_deliveries d ON d.sessionId = q.id
+    LEFT JOIN ecpay_orders e ON e.sessionId = q.id
     WHERE q.guestSessionHash = ? AND q.expiresAt > UTC_TIMESTAMP() ORDER BY q.id DESC LIMIT 100`, [guestHash]);
   return rows.map(r => ({ id: Number(r.id), plan: String(r.plan), amount: Number(r.amount), status: String(r.status),
-    reportReady: !!r.reportReady, createdAt: new Date(r.createdAt).toISOString(), expiresAt: new Date(r.expiresAt).toISOString() }));
+    testPaid: !!r.testPaid, reportReady: !!r.reportReady, createdAt: new Date(r.createdAt).toISOString(), expiresAt: new Date(r.expiresAt).toISOString() }));
 }
 export async function claimEmail(id: number, token: string) {
   const pool = await getDatabasePool();

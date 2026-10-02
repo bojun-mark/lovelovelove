@@ -64,3 +64,9 @@ export const reportDeliveries = mysqlTable('report_deliveries', {
 export type InsertUser = typeof users.$inferInsert;
 export type QuizSession = typeof quizSessions.$inferSelect;
 export type InsertQuizSession = typeof quizSessions.$inferInsert;
+
+export const sampleReports = mysqlTable('sample_reports', {
+  sessionId: int('sessionId').primaryKey(),
+  report: longtext('report').notNull(),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+});

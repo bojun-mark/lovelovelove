@@ -62,6 +62,11 @@ async function initializeDatabase() {
       paid TINYINT NOT NULL DEFAULT 0,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS sample_reports (
+      sessionId INT NOT NULL PRIMARY KEY,
+      report LONGTEXT NOT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
     _pool = pool;
     _db = drizzle(pool);
     console.log("[Database] Tables ready");

@@ -1,3 +1,4 @@
+import { sampleReport } from './sampleReport';
 import { z } from "zod";
 import { paymentConfig, newTradeNo, siteOrigin } from './ecpay';
 import { attachEcpay, getEcpay, reconcileEcpay } from './ecpayStore';
@@ -33,6 +34,10 @@ function serializeSession(session: NonNullable<Awaited<ReturnType<typeof getQuiz
 export const appRouter = router({
   system: systemRouter,
   starLove: router({
+    sampleReport: publicProcedure.input(reportInput.extend({ create: z.boolean().optional() })).mutation(async ({ input, ctx }) => {
+      assertReportAccessLimit(ctx.req);
+      return sampleReport(input, ctx.guestSessionHash);
+    }),
     deliveryStatus: publicProcedure.query(() => ({ emailConfigured: emailConfigured() })),
     myOrders: publicProcedure.query(async ({ ctx }) => {
       assertReportAccessLimit(ctx.req);
