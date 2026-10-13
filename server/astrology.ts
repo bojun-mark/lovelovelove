@@ -134,7 +134,8 @@ function ascendant(date: Date, latitude: number, longitude: number) {
   const eps = meanObliquity(date);
   const lst = mod360(gmstDegrees(date) + longitude);
   const lambda = mod360(atan2d(-cosd(lst), sind(lst) * cosd(eps) + tand(latitude) * sind(eps)));
-  return lambda;
+  // Choose the eastern horizon intersection (the other solution is the descendant).
+  return mod360(lambda + 180);
 }
 
 export async function calculateBirthChart(input: { year: string; month: string; day: string; time?: string; place: string }): Promise<BirthChart> {
@@ -151,10 +152,7 @@ export async function calculateBirthChart(input: { year: string; month: string; 
     const delta = ((next - lon + 540) % 360) - 180;
     planets[name] = signPoint(lon, delta < 0);
   }
-  // Pluto is slow enough that a simple mean-longitude approximation is more useful than omitting it.
-  const jd = julianDay(utcDate);
-  const pluto = mod360(238.95 + 145.2078 * ((jd - 2451545) / 36525));
-  planets["冥王星"] = signPoint(pluto);
+  // Omit Pluto: mean longitude alone is not a reliable geocentric position.
 
   const houses: Array<{ house: number; sign: string }> = [];
   let asc: ChartPoint | undefined;
@@ -168,7 +166,7 @@ export async function calculateBirthChart(input: { year: string; month: string; 
     note = "未提供出生時間，因此未計算上升與宮位；太陽、月亮與行星位置仍依出生日期與地點計算。";
   }
 
-  note = [note, "出生地使用所選城市中心的近似座標。"].filter(Boolean).join(" ");
+  note = [note, "出生地使用所選城市中心的近似座標。行星採低精度近似星曆、熱帶黃道與整宮制；不適合精確相位或交界度數判斷。冥王星因缺少可靠計算而省略，不可自行補入。"].filter(Boolean).join(" ");
 
   return {
     calculatedAt: new Date().toISOString(),

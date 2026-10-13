@@ -1,3 +1,4 @@
+import { reportSpec } from './reportPrompt';
 import { randomBytes } from 'node:crypto';
 import type { QuizSession } from '../drizzle/schema';
 import type { BirthChart } from './astrology';
@@ -21,7 +22,7 @@ export async function durableReport(session: QuizSession, generate: () => Promis
   }
   try {
     const result = await generate();
-    if (result.report.trim().length < 1000) throw new Error('報告尚未完整，請稍後重試，不需重新付款。');
+    if (result.report.trim().length < reportSpec(session.amount).minLength) throw new Error('報告尚未完整，請稍後重試，不需重新付款。');
     await saveReport(session.id, token, result.report, result.chart);
     return result;
   } catch {

@@ -6,7 +6,7 @@ const store = vi.hoisted(() => ({ getDelivery: vi.fn(), claimReport: vi.fn(), sa
 vi.mock('./reportStore', async importOriginal => ({ ...await importOriginal<typeof import('./reportStore')>(), ...store }));
 import { authorizeOrder, durableReport, safeDeliverEmail } from './reportDelivery';
 import { hashRecoveryCode } from './reportStore';
-const order = { id: 7, status: 'paid', guestSessionHash: 'owner', email: 'customer@example.test', expiresAt: new Date(Date.now() + 86400000) } as QuizSession;
+const order = { id: 7, amount: 199, status: 'paid', guestSessionHash: 'owner', email: 'customer@example.test', expiresAt: new Date(Date.now() + 86400000) } as QuizSession;
 const generated = { report: '測試報告內容'.repeat(250), chart: { birth: { place: '台灣・新北市・板橋區' } } as BirthChart };
 beforeEach(() => {
   vi.resetAllMocks();
@@ -16,6 +16,13 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 describe('paid report delivery', () => {
+  it('accepts a complete basic report but rejects that length for full reports', async () => {
+    const short = { ...generated, report: '字'.repeat(700) };
+    expect(await durableReport({ ...order, amount: 99 }, async () => short)).toEqual(short);
+    store.saveReport.mockClear();
+    await expect(durableReport({ ...order, amount: 299 }, async () => short)).rejects.toThrow('請勿重複付款');
+    expect(store.saveReport).not.toHaveBeenCalled();
+  });
   it('rejects unknown, other-owner and expired orders; accepts high entropy recovery code', () => {
     expect(() => authorizeOrder(undefined, 'owner')).toThrow();
     expect(() => authorizeOrder(order, 'other')).toThrow();

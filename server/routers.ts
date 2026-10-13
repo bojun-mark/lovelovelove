@@ -1,3 +1,4 @@
+import { reportContextSchema, contextMatches, readReportContext } from '../shared/reportQuestions';
 import { sampleReport } from './sampleReport';
 import { z } from "zod";
 import { paymentConfig, newTradeNo, siteOrigin } from './ecpay';
@@ -15,7 +16,7 @@ import { ENV } from "./_core/env";
 import Stripe from "stripe";
 import { calculateBirthChart, type BirthChart } from "./astrology";
 
-const quizInput = z.object({ nickname: z.string().min(1), year: z.string().min(4), month: z.string().min(1), day: z.string().min(1), time: z.string().optional(), place: z.string().min(1), email: z.string().email(), colors: z.array(z.string()).length(2), answers: z.array(z.number()).length(10), category: z.string().min(1), subQuestion: z.string().min(1), plan: z.string().min(1), amount: z.number().int().positive() });
+const quizInput = z.object({ nickname: z.string().min(1), year: z.string().min(4), month: z.string().min(1), day: z.string().min(1), time: z.string().optional(), place: z.string().min(1), email: z.string().email(), colors: z.array(z.string()).length(2), answers: z.array(z.number().int().min(0).max(3)).length(10), reportContext: reportContextSchema.optional(), category: z.string().min(1), subQuestion: z.string().min(1), plan: z.string().min(1), amount: z.number().int().positive() });
 const reportInput = z.object({ sessionId: z.number().int().positive(), recoveryCode: z.string().max(100).optional() });
 const verifyInput = z.object({ sessionId: z.string().min(1) });
 const checkoutInput = quizInput.extend({ planId: z.enum(["basic", "plus", "full"]) });
@@ -27,7 +28,7 @@ function serializeSession(session: NonNullable<Awaited<ReturnType<typeof getQuiz
     id: session.id, nickname: session.nickname, year: session.birthYear, month: session.birthMonth, day: session.birthDay,
     time: session.birthTime === "未提供" ? "" : session.birthTime, place: session.birthPlace, email: session.email,
     colors: JSON.parse(session.colors) as string[], answers: JSON.parse(session.answers) as number[], category: session.category,
-    subQuestion: session.subQuestion, plan: session.plan, amount: session.amount, status: session.status,
+    reportContext: readReportContext(session.reportContext), subQuestion: session.subQuestion, plan: session.plan, amount: session.amount, status: session.status,
   };
 }
 
@@ -79,9 +80,10 @@ export const appRouter = router({
     createCheckout: publicProcedure.input(checkoutInput).mutation(async ({ input, ctx }) => {
       assertAnonymousRateLimit(ctx.req, ctx.guestSessionHash);
       resolveBirthMoment(input);
+      if (input.reportContext && !contextMatches(input.reportContext, input.category, input.subQuestion)) throw new Error('追問答案與所選主題不符，請重新選擇');
       paymentConfig(); siteOrigin();
       const amount = planPrices[input.planId];
-      const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), category: input.category, subQuestion: input.subQuestion, plan: input.plan, amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
+      const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), reportContext: input.reportContext ? JSON.stringify(input.reportContext) : null, category: input.category, subQuestion: input.subQuestion, plan: ({ basic: "基礎啟示版", plus: "進階解惑版", full: "尊榮完整版" } as const)[input.planId], amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
       if (!id) throw new Error("無法建立付款訂單");
       const recoveryCode = await issueRecoveryCode(id);
       const tradeNo = newTradeNo();
@@ -118,7 +120,8 @@ export const appRouter = router({
     saveSession: publicProcedure.input(quizInput).mutation(async ({ input, ctx }) => {
       assertAnonymousRateLimit(ctx.req, ctx.guestSessionHash);
       resolveBirthMoment(input);
-      const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), category: input.category, subQuestion: input.subQuestion, plan: input.plan, amount: input.amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
+      if (input.reportContext && !contextMatches(input.reportContext, input.category, input.subQuestion)) throw new Error('追問答案與所選主題不符，請重新選擇');
+      const id = await createQuizSession({ nickname: input.nickname, birthYear: input.year, birthMonth: input.month, birthDay: input.day, birthTime: input.time || "未提供", birthPlace: input.place, email: input.email, colors: JSON.stringify(input.colors), answers: JSON.stringify(input.answers), reportContext: input.reportContext ? JSON.stringify(input.reportContext) : null, category: input.category, subQuestion: input.subQuestion, plan: input.plan, amount: input.amount, status: "pending", guestSessionHash: ctx.guestSessionHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), consentAt: new Date() });
       return { success: true, id } as const;
     }),
     generateReport: publicProcedure.input(reportInput).mutation(async ({ input, ctx }) => {

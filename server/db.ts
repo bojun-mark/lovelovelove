@@ -67,6 +67,12 @@ async function initializeDatabase() {
       report LONGTEXT NOT NULL,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    // Additive migration: old orders retain NULL and remain readable.
+    const [contextColumns] = await pool.query("SHOW COLUMNS FROM quiz_sessions LIKE 'reportContext'");
+    if (!(contextColumns as unknown[]).length) {
+      try { await pool.query("ALTER TABLE quiz_sessions ADD COLUMN reportContext TEXT NULL"); }
+      catch (error) { if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw error; }
+    }
     _pool = pool;
     _db = drizzle(pool);
     console.log("[Database] Tables ready");

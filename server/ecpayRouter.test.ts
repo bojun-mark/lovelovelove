@@ -28,4 +28,18 @@ describe('ECPay router boundary', () => {
     expect(db.createQuizSession.mock.calls[0][0].amount).toBe(99);
     expect(result.recoveryCode).toBe('7.private');expect(result.checkoutUrl).toMatch(/^\/api\/ecpay\/checkout\/SL[a-f0-9]{18}$/);
   });
+  it('saves full followups with the order and rejects a category mismatch before saving', async () => {
+    db.createQuizSession.mockResolvedValue(7);
+    const reportContext = {version:1 as const, priorityState:8, followups:['整理資料與規劃','沒有時間與力氣','每週兩小時'] as [string,string,string],recentExample:'整理過活動名單'};
+    const input = {nickname:'測試',year:'1994',month:'7',day:'15',place:'台北',email:'reader@example.test',colors:['a','b'],answers:Array(10).fill(3),category:'事業與財富',subQuestion:'我的能力適合發展哪一種副業？',plan:'假的完整版',planId:'basic' as const,amount:299,reportContext};
+    await appRouter.createCaller(context).starLove.createCheckout(input);
+    expect(JSON.parse(db.createQuizSession.mock.calls[0][0].reportContext)).toEqual(reportContext);
+    expect(db.createQuizSession.mock.calls[0][0].plan).toBe('基礎啟示版');
+    db.createQuizSession.mockClear();
+    await expect(appRouter.createCaller(context).starLove.createCheckout({...input,category:'感情與人際'})).rejects.toThrow('追問');
+    expect(db.createQuizSession).not.toHaveBeenCalled();
+    await expect(appRouter.createCaller(context).starLove.createCheckout({...input,answers:Array(10).fill(4)})).rejects.toThrow();
+    expect(db.createQuizSession).not.toHaveBeenCalled();
+  });
+
 });

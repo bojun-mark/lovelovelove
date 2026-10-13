@@ -24,6 +24,7 @@ export const quizSessions = mysqlTable("quiz_sessions", {
   email: varchar("email", { length: 320 }).notNull(),
   colors: text("colors").notNull(),
   answers: text("answers").notNull(),
+  reportContext: text("reportContext"),
   category: varchar("category", { length: 80 }).notNull(),
   subQuestion: text("subQuestion").notNull(),
   plan: varchar("plan", { length: 80 }).notNull(),
