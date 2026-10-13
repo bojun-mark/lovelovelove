@@ -1,0 +1,73 @@
+import { char, datetime, index, int, longtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+
+export const users = mysqlTable("users", {
+  id: int("id").autoincrement().primaryKey(),
+  openId: varchar("openId", { length: 64 }).notNull().unique(),
+  name: text("name"),
+  email: varchar("email", { length: 320 }),
+  loginMethod: varchar("loginMethod", { length: 64 }),
+  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+});
+
+export const quizSessions = mysqlTable("quiz_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  guestSessionHash: varchar("guestSessionHash", { length: 64 }).notNull(),
+  nickname: varchar("nickname", { length: 80 }).notNull(),
+  birthYear: varchar("birthYear", { length: 4 }).notNull(),
+  birthMonth: varchar("birthMonth", { length: 2 }).notNull(),
+  birthDay: varchar("birthDay", { length: 2 }).notNull(),
+  birthTime: varchar("birthTime", { length: 8 }).notNull(),
+  birthPlace: varchar("birthPlace", { length: 120 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  colors: text("colors").notNull(),
+  answers: text("answers").notNull(),
+  reportContext: text("reportContext"),
+  category: varchar("category", { length: 80 }).notNull(),
+  subQuestion: text("subQuestion").notNull(),
+  plan: varchar("plan", { length: 80 }).notNull(),
+  amount: int("amount").notNull(),
+  status: mysqlEnum("status", ["pending", "paid", "failed", "expired"]).default("pending").notNull(),
+  stripeCheckoutSessionId: varchar("stripeCheckoutSessionId", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  consentAt: timestamp("consentAt"),
+}, table => ({
+  guestSessionHashIdx: index("quiz_sessions_guest_session_hash_idx").on(table.guestSessionHash),
+  expiresAtIdx: index("quiz_sessions_expires_at_idx").on(table.expiresAt),
+}));
+
+export type User = typeof users.$inferSelect;
+export const ecpayOrders = mysqlTable('ecpay_orders', {
+  sessionId: int('sessionId').primaryKey(),
+  tradeNo: varchar('tradeNo', {length: 20}).notNull().unique(),
+  environment: varchar('environment', {length: 8}).notNull(),
+  merchantId: varchar('merchantId', {length: 10}).notNull(),
+  paid: int('paid').notNull().default(0),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+});
+// Created additively at startup by db.ts; keep the schema visible to Drizzle tooling.
+export const reportDeliveries = mysqlTable('report_deliveries', {
+  sessionId: int('sessionId').primaryKey(),
+  recoveryHash: char('recoveryHash', { length: 64 }),
+  report: longtext('report'), chart: longtext('chart'),
+  leaseToken: varchar('leaseToken', { length: 64 }), leaseUntil: datetime('leaseUntil'),
+  attempts: int('attempts').notNull().default(0), lastAttempt: datetime('lastAttempt'),
+  emailState: varchar('emailState', { length: 24 }).notNull().default('not_sent'),
+  emailLease: varchar('emailLease', { length: 64 }), emailLeaseUntil: datetime('emailLeaseUntil'),
+  emailAttempts: int('emailAttempts').notNull().default(0), emailAttemptAt: datetime('emailAttemptAt'),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+  updatedAt: timestamp('updatedAt').defaultNow().onUpdateNow().notNull(),
+});
+export type InsertUser = typeof users.$inferInsert;
+export type QuizSession = typeof quizSessions.$inferSelect;
+export type InsertQuizSession = typeof quizSessions.$inferInsert;
+
+export const sampleReports = mysqlTable('sample_reports', {
+  sessionId: int('sessionId').primaryKey(),
+  report: longtext('report').notNull(),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+});

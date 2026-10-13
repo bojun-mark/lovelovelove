@@ -1,0 +1,8 @@
+.report-followups { margin: 28px 0; padding: clamp(18px, 4vw, 32px); border: 1px solid #756385; border-radius: 20px; background: #241c32; scroll-margin-top: 100px; }
+.report-followups h2 { margin-top: 0; }
+.report-followups p, .report-followups small { color: #cec2dc; line-height: 1.7; }
+.report-followups label { display: block; margin-top: 24px; line-height: 1.7; color: #f2eaf9; font-weight: 600; }
+.report-followups select, .report-followups textarea { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 10px; padding: 12px; border: 1px solid #9381a5; border-radius: 10px; background: #171022; color: #f2eaf9; font: inherit; }
+.report-followups textarea { resize: vertical; }
+.report-followups textarea::placeholder { color: #bdb1cb; font-weight: 400; }
+.report-followups select:focus-visible, .report-followups textarea:focus-visible { outline: 2px solid #e8b86a; outline-offset: 3px; }
